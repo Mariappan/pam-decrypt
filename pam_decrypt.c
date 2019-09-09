@@ -16,7 +16,7 @@
 
 const char *user = "maari";
 const char *device = "/dev/nvme0n1p4";
-const char *dev_mapper = "/dev/mapper/home-maari";
+const char *dev_mapper = "/dev/mapper/crypthome";
 
 /**
  * converse -
@@ -129,29 +129,16 @@ static void auth_grab_authtok(pam_handle_t *pamh)
 
     if (authtok == NULL) {
         ret = read_password(pamh, "Decryption Password:", &authtok);
-        if (ret == PAM_SUCCESS) {
-            /*
-             * pam_set_item() copies to PAM-internal memory.
-             *
-             * Using pam_set_item(PAM_AUTHTOK) here to make the
-             * password that was just entered available to further
-             * PAM modules.
-             */
-            ret = pam_set_item(pamh, PAM_AUTHTOK, authtok);
-            if (ret != PAM_SUCCESS)
-                fprintf(stderr, "warning: failure to export password (%s)\n",
-                    pam_strerror(pamh, ret));
-        }
     }
 
-    sprintf(command, "echo %s | tr '\\0' '\\n' | /usr/sbin/cryptsetup open %s home-%s", authtok, device, user);
+    snprintf(command, sizeof(command), "echo %s | tr '\\0' '\\n' | /usr/sbin/cryptsetup open %s crypthome", authtok, device);
     ret = system(command);
 
     if (0 == WEXITSTATUS(ret)) {
         send_message(pamh, "Decryption Successful");
 
         memset(command, 0, sizeof(command));
-        sprintf(command, "mount %s /home", dev_mapper);
+        snprintf(command, sizeof(command), "mount %s /home", dev_mapper);
         ret = system(command);
     } else {
         send_message(pamh, "Decryption failed");
@@ -163,13 +150,20 @@ static void auth_grab_authtok(pam_handle_t *pamh)
 PAM_EXTERN int pam_sm_authenticate(pam_handle_t *handle, int flags, int argc,
                    const char **argv)
 {
-    int pam_code;
-
     const char *username = NULL;
-    const char *password = NULL;
 
     if (access(dev_mapper, F_OK) != -1) { // file exists
         return PAM_SUCCESS;
+    }
+
+    pam_get_item(handle, PAM_USER, (const void **)((void *) &username));
+
+    if (username == NULL) return PAM_SUCCESS;
+
+    if (username != NULL) {
+        if (strncmp(username, user, strlen(user))) {
+            return PAM_SUCCESS;
+        }
     }
 
     auth_grab_authtok(handle);
